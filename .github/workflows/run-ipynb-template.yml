@@ -8,9 +8,6 @@ jobs:
     name: ipynb (${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
-    defaults:
-      run:
-        shell: bash -l {0}
     strategy:
       fail-fast: false
       matrix:
@@ -37,7 +34,7 @@ jobs:
 
     - run: | 
         conda config --add channels conda-forge
-        buildevents cmd $TRACE_ID $STEP_ID 'conda install' -- conda install -c conda-forge graphviz 
+        conda install -c conda-forge graphviz 
 
     - uses: actions/checkout@v4
 
