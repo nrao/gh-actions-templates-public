@@ -38,17 +38,17 @@ jobs:
         #channels: conda-forge
 
     - run: | 
-        buildevents cmd $TRACE_ID $STEP_ID conda config --add channels conda-forge
-        buildevents cmd $TRACE_ID $STEP_ID conda install -c conda-forge graphviz 
+        buildevents cmd $TRACE_ID $STEP_ID -- conda config --add channels conda-forge
+        buildevents cmd $TRACE_ID $STEP_ID -- conda install -c conda-forge graphviz 
 
     - uses: actions/checkout@v4
 
     - name: Install dependencies with pip
       run: |
-        buildevents cmd $TRACE_ID $STEP_ID python -m pip install --upgrade pip
-        buildevents cmd $TRACE_ID $STEP_ID pip install ".[all]" #The magic if not present download fails in ipynb
-        buildevents cmd $TRACE_ID $STEP_ID pip install graphviz
-        buildevents cmd $TRACE_ID $STEP_ID pip install holoviews
+        buildevents cmd $TRACE_ID $STEP_ID -- python -m pip install --upgrade pip
+        buildevents cmd $TRACE_ID $STEP_ID -- pip install ".[all]" #The magic if not present download fails in ipynb
+        buildevents cmd $TRACE_ID $STEP_ID -- pip install graphviz
+        buildevents cmd $TRACE_ID $STEP_ID -- pip install holoviews
 
     - name: Run Jupyter notebooks
       run: |
@@ -61,7 +61,7 @@ jobs:
 
         cd "$NOTEBOOK_DIR"
 
-        buildevents cmd $TRACE_ID $STEP_ID jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" 
+        buildevents cmd $TRACE_ID $STEP_ID -- jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" 
         cd "$ORIGINAL_DIR"
        done
 
