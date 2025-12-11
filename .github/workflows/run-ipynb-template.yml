@@ -21,7 +21,7 @@ jobs:
         apikey: ${{ secrets.BUILDEVENT_APIKEY }}
         dataset: buildevents
         status: ${{ job.status }}
-        matrix-key: (${{ matrix.python-version }}, ${{ matrix.os }})
+        otel-traceid: true
         send-init-event: true
     steps:  
     - name: Setup Conda
