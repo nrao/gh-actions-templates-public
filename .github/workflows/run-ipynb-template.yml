@@ -33,31 +33,41 @@ jobs:
         #channels: conda-forge
 
     - run: | 
-        conda config --add channels conda-forge
-        conda install -c conda-forge graphviz 
+        echo "STEP_ID=conda" >> $GITHUB_ENV
+        echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
+        source $GITHUB_ENV
+        buildevents cmd $TRACE_ID $STEP_ID 'config' -- \
+          conda config --add channels conda-forge
+        buildevents cmd $TRACE_ID $STEP_ID 'install' -- \
+          conda install -c conda-forge graphviz 
 
     - uses: actions/checkout@v4
 
     - name: Install dependencies with pip
       run: |
-        buildevents cmd $TRACE_ID $STEP_ID 'setup pip' -- python -m pip install --upgrade pip
-        buildevents cmd $TRACE_ID $STEP_ID 'pip install' -- pip install ".[all]" #The magic if not present download fails in ipynb
-        buildevents cmd $TRACE_ID $STEP_ID 'add dependencies' -- pip install graphviz holoviews
+        echo "STEP_ID=pip" >> $GITHUB_ENV
+        echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
+        source $GITHUB_ENV
+        buildevents cmd $TRACE_ID $STEP_ID 'self update' -- \
+          python -m pip install --upgrade pip
+        buildevents cmd $TRACE_ID $STEP_ID 'install project' -- \
+          pip install ".[all]" #The magic if not present download fails in ipynb
+        buildevents cmd $TRACE_ID $STEP_ID 'add dependencies' -- \
+          pip install graphviz holoviews
 
     - name: Run Jupyter notebooks
       run: |
-       ORIGINAL_DIR=$(pwd)
-       for notebook in $(find docs -name '*.ipynb'); do
-        echo "Running notebook: $notebook"
+        ORIGINAL_DIR=$(pwd)
+        for notebook in $(find docs -name '*.ipynb'); do
+          echo "Running notebook: $notebook"
   
-        NOTEBOOK_DIR=$(dirname "$notebook")
-        NOTEBOOK_FILE=$(basename "$notebook")
+          NOTEBOOK_DIR=$(dirname "$notebook")
+          NOTEBOOK_FILE=$(basename "$notebook")
+          cd "$NOTEBOOK_DIR"
 
-        cd "$NOTEBOOK_DIR"
-
-        buildevents cmd $TRACE_ID $STEP_ID 'nbconvert' -- jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" 
-        cd "$ORIGINAL_DIR"
-       done
+          jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" 
+          cd "$ORIGINAL_DIR"
+        done
 
     outputs:
       trace-start: ${{ steps.set-trace-start.outputs.trace-start }}
