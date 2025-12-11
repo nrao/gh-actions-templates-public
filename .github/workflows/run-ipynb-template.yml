@@ -72,12 +72,12 @@ jobs:
     if: ${{ always() }}
     permissions:
       actions: read
-  steps:
-  - uses: technote-space/workflow-conclusion-action@v3
-  - uses: honeycombio/gha-buildevents@v2
-    with:
-      apikey: ${{ secrets.BUILDEVENT_APIKEY }}
-      dataset: gha-buildevents_integration
-      status: ${{ env.WORKFLOW_CONCLUSION }}
-      trace-start: ${{ needs.build.outputs.trace-start}}
-      matrix-key: ${{ matrix.os }}
+    steps:
+    - uses: technote-space/workflow-conclusion-action@v3
+    - uses: honeycombio/gha-buildevents@v2
+      with:
+        apikey: ${{ secrets.BUILDEVENT_APIKEY }}
+        dataset: gha-buildevents_integration
+        status: ${{ env.WORKFLOW_CONCLUSION }}
+        trace-start: ${{ needs.build.outputs.trace-start}}
+        matrix-key: ${{ matrix.os }}
