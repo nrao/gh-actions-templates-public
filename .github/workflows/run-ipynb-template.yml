@@ -22,6 +22,7 @@ jobs:
         dataset: buildevents
         status: ${{ job.status }}
         matrix-key: (${{ matrix.python-version }}, ${{ matrix.os }})
+        send-init-event: true
     steps:  
     - name: Setup Conda
       uses: conda-incubator/setup-miniconda@v3
