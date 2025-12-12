@@ -59,7 +59,7 @@ jobs:
         echo "STEP_ID=pytest" >> $GITHUB_ENV
         echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
         source $GITHUB_ENV
-        buildevents cmd $TRACE_ID $STEP_ID 'self update' -- \
+        buildevents cmd $TRACE_ID $STEP_ID 'run tests' -- \
           pytest -v ${{ inputs.test-path }} \
           --html=test-results.html --self-contained-html \
           --cov=${{ inputs.cov_project }} --no-cov-on-fail \
