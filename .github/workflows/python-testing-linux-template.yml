@@ -47,6 +47,7 @@ jobs:
       run: |
         echo "STEP_ID=pip" >> $GITHUB_ENV
         echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
+        source $GITHUB_ENV
         buildevents cmd $TRACE_ID $STEP_ID 'self update' -- \
           python -m pip install --upgrade pip
         buildevents cmd $TRACE_ID $STEP_ID 'install package' -- \
@@ -57,6 +58,7 @@ jobs:
       run: |
         echo "STEP_ID=pytest" >> $GITHUB_ENV
         echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
+        source $GITHUB_ENV
         buildevents cmd $TRACE_ID $STEP_ID 'self update' -- \
           pytest -v ${{ inputs.test-path }} \
           --html=test-results.html --self-contained-html \
