@@ -19,7 +19,6 @@ jobs:
 
     steps:
     - name: Set trace-start
-      id: set-trace-start
       run: |
         echo "trace-start=$(date +%s)" >> $GITHUB_OUTPUT
     - uses: honeycombio/gha-buildevents@v2
@@ -29,7 +28,6 @@ jobs:
         matrix-key: os
 
     - name: Setup Conda
-      id: setup-conda
       uses: conda-incubator/setup-miniconda@v3
       with:
         auto-activate-base: false
@@ -39,7 +37,6 @@ jobs:
         #channels: conda-forge
 
     - name: conda install
-      id: conda
       run: | 
         echo "STEP_ID=conda" >> $GITHUB_ENV
         echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
@@ -48,24 +45,23 @@ jobs:
           conda config --add channels conda-forge
         buildevents cmd $TRACE_ID $STEP_ID 'install' -- \
           conda install -c conda-forge graphviz 
+        buildevents step $TRACE_ID $STEP_ID $STEP_START $STEP_ID
 
     - uses: actions/checkout@v4
 
     - name: Install dependencies with pip
-      id: pip
       run: |
         echo "STEP_ID=pip" >> $GITHUB_ENV
         echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
-        source $GITHUB_ENV
         buildevents cmd $TRACE_ID $STEP_ID 'self update' -- \
           python -m pip install --upgrade pip
         buildevents cmd $TRACE_ID $STEP_ID 'install project' -- \
           pip install ".[all]" #The magic if not present download fails in ipynb
         buildevents cmd $TRACE_ID $STEP_ID 'add dependencies' -- \
           pip install graphviz holoviews
-
+        buildevents step $TRACE_ID $STEP_ID $STEP_START $STEP_ID
+          
     - name: Run Jupyter notebooks
-      id: jupyter
       run: |
         ORIGINAL_DIR=$(pwd)
         for notebook in $(find docs -name '*.ipynb'); do
@@ -75,7 +71,11 @@ jobs:
           NOTEBOOK_FILE=$(basename "$notebook")
           cd "$NOTEBOOK_DIR"
 
-          jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" 
+          echo "STEP_ID=convert $notebook" >> $GITHUB_ENV
+          echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
+          buildevents cmd $TRACE_ID $STEP_ID 'jupyter' -- \
+            jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE"
+
           cd "$ORIGINAL_DIR"
         done
 
