@@ -9,4 +9,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set trace-start
+        run: |
+          echo "trace-start=$(date +%s)" >> $GITHUB_OUTPUT
+          
+      - uses: honeycombio/gha-buildevents@v2
+        with:
+          apikey: ${{ secrets.BUILDEVENT_APIKEY }}
+          dataset: gha-buildevents_integration
+          matrix-key: os
+
       - uses: psf/black@stable
