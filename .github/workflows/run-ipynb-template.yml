@@ -40,7 +40,6 @@ jobs:
       run: | 
         echo "STEP_ID=conda" >> $GITHUB_ENV
         echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
-        source $GITHUB_ENV
         buildevents cmd $TRACE_ID $STEP_ID 'config' -- \
           conda config --add channels conda-forge
         buildevents cmd $TRACE_ID $STEP_ID 'install' -- \
