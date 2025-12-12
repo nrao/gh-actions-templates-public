@@ -40,6 +40,7 @@ jobs:
       run: | 
         echo "STEP_ID=conda" >> $GITHUB_ENV
         echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
+        source $GITHUB_ENV
         buildevents cmd $TRACE_ID $STEP_ID 'config' -- \
           conda config --add channels conda-forge
         buildevents cmd $TRACE_ID $STEP_ID 'install' -- \
@@ -52,6 +53,7 @@ jobs:
       run: |
         echo "STEP_ID=pip" >> $GITHUB_ENV
         echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
+        source $GITHUB_ENV
         buildevents cmd $TRACE_ID $STEP_ID 'self update' -- \
           python -m pip install --upgrade pip
         buildevents cmd $TRACE_ID $STEP_ID 'install project' -- \
@@ -72,6 +74,7 @@ jobs:
 
           echo "STEP_ID=convert $notebook" >> $GITHUB_ENV
           echo "STEP_START=$(date +%s)" >> $GITHUB_ENV
+          source $GITHUB_ENV
           buildevents cmd $TRACE_ID $STEP_ID 'jupyter' -- \
             jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE"
 
