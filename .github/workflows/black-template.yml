@@ -18,7 +18,6 @@ jobs:
         with:
           apikey: ${{ secrets.BUILDEVENT_APIKEY }}
           dataset: gha-buildevents_integration
-          matrix-key: os
 
       - uses: psf/black@stable
 
@@ -35,4 +34,4 @@ jobs:
         apikey: ${{ secrets.BUILDEVENT_APIKEY }}
         dataset: gha-buildevents_integration
         status: ${{ env.WORKFLOW_CONCLUSION }}
-        trace-start: ${{ needs.build.outputs.trace-start}}
+        trace-start: ${{ needs.lint.outputs.trace-start}}
