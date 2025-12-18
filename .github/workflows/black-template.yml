@@ -9,4 +9,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set trace-start
+        run: |
+          echo "trace-start=$(date +%s)" >> $GITHUB_OUTPUT
+          
+      - uses: honeycombio/gha-buildevents@v2
+        with:
+          apikey: ${{ secrets.BUILDEVENT_APIKEY }}
+          dataset: gha-buildevents_integration
+
       - uses: psf/black@stable
+
+  end-trace:
+    runs-on: ubuntu-latest
+    needs: [lint]
+    if: ${{ always() }}
+    permissions:
+      actions: read
+    steps:
+    - uses: technote-space/workflow-conclusion-action@v3
+    - uses: honeycombio/gha-buildevents@v2
+      with:
+        apikey: ${{ secrets.BUILDEVENT_APIKEY }}
+        dataset: gha-buildevents_integration
+        status: ${{ env.WORKFLOW_CONCLUSION }}
+        trace-start: ${{ needs.lint.outputs.trace-start}}
