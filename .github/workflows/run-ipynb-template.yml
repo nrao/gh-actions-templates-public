@@ -79,10 +79,10 @@ jobs:
          
          # Delete all .zarr directories (recursive)
          find . -maxdepth 1 -name '*.zarr' -type d -exec rm -rf {} +
-         
-         # Delete all .ms files
-         find . -maxdepth 1 -name '*.ms' -type f -exec rm -f {} +
-         
+          
+         # Delete all .ms directories (recursive)
+         find . -maxdepth 1 -name '*.ms' -type d -exec rm -rf {} +
+          
          # 4. Return to the original directory
          cd "$ORIGINAL_DIR"
          
