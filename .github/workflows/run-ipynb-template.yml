@@ -69,8 +69,11 @@ jobs:
                            --ExecutePreprocessor.timeout=1800 \
                            --ExecutePreprocessor.iopub_timeout=1800 \
                            --Application.log_level=INFO
+
+         # 2.Stop any running Jupyter notebook server (if applicable)
+         jupyter notebook stop
          
-         # 2. Localized Cleanup: Delete all .zarr and .ms files/directories 
+         # 3. Localized Cleanup: Delete all .zarr and .ms files/directories 
          # ONLY within the current NOTEBOOK_DIR.
          echo "Performing localized cleanup in $(pwd)..."
          
@@ -80,10 +83,10 @@ jobs:
          # Delete all .ms files
          find . -maxdepth 1 -name '*.ms' -type f -exec rm -f {} +
          
-         # 3. Return to the original directory
+         # 4. Return to the original directory
          cd "$ORIGINAL_DIR"
          
-         # 4. Introduce a pause
+         # 5. Introduce a pause
          # This pause is still crucial for allowing the OS to fully release memory and 
          # file handles before the next Jupyter kernel is launched.
          echo "Pausing for 5 seconds to release resources..."
