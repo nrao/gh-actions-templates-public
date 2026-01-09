@@ -18,7 +18,6 @@ jobs:
       MKL_NUM_THREADS: "1"
       NUMEXPR_NUM_THREADS: "1"
       JUPYTER_CLIENT_DEBUG: "1"
-    
     strategy:
       fail-fast: false
       matrix:
@@ -70,19 +69,16 @@ jobs:
                            --ExecutePreprocessor.iopub_timeout=1800 \
                            --Application.log_level=INFO
 
-         # 2.Stop any running Jupyter notebook server (if applicable)
-         jupyter notebook stop
-         
-         # 3. Localized Cleanup: Delete all .zarr and .ms files/directories 
+         # 2. Localized Cleanup: Delete all .zarr and .ms files/directories 
          # ONLY within the current NOTEBOOK_DIR.
          echo "Performing localized cleanup in $(pwd)..."
          
          # Delete all .zarr directories (recursive)
          find . -maxdepth 1 -name '*.zarr' -type d -exec rm -rf {} +
-         
-         # Delete all .ms files
-         find . -maxdepth 1 -name '*.ms' -type f -exec rm -f {} +
-         
+          
+         # Delete all .ms directories (recursive)
+         find . -maxdepth 1 -name '*.ms' -type d -exec rm -rf {} +
+          
          # 4. Return to the original directory
          cd "$ORIGINAL_DIR"
          
