@@ -70,10 +70,7 @@ jobs:
                            --ExecutePreprocessor.iopub_timeout=1800 \
                            --Application.log_level=INFO
 
-         # 2.Stop any running Jupyter notebook server (if applicable)
-         jupyter notebook stop
-         
-         # 3. Localized Cleanup: Delete all .zarr and .ms files/directories 
+         # 2. Localized Cleanup: Delete all .zarr and .ms files/directories 
          # ONLY within the current NOTEBOOK_DIR.
          echo "Performing localized cleanup in $(pwd)..."
          
