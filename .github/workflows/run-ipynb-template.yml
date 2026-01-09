@@ -18,7 +18,6 @@ jobs:
       MKL_NUM_THREADS: "1"
       NUMEXPR_NUM_THREADS: "1"
       JUPYTER_CLIENT_DEBUG: "1"
-    
     strategy:
       fail-fast: false
       matrix:
