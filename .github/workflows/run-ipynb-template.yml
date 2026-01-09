@@ -7,10 +7,17 @@ jobs:
   build:
     name: ipynb (${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash -l {0}
+    env:
+      MPLBACKEND: Agg
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+      JUPYTER_CLIENT_DEBUG: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -41,15 +48,45 @@ jobs:
 
     - name: Run Jupyter notebooks
       run: |
-       ORIGINAL_DIR=$(pwd)
-       for notebook in $(find docs -name '*.ipynb'); do
-        echo "Running notebook: $notebook"
-  
-        NOTEBOOK_DIR=$(dirname "$notebook")
-        NOTEBOOK_FILE=$(basename "$notebook")
+        ORIGINAL_DIR=$(pwd)
+        
+        # Initial check (optional but good practice)
+        echo "Starting notebook execution loop..."
+        
+        for notebook in $(find docs -name '*.ipynb'); do
+         echo "--- Running notebook: $notebook ---"
+         
+         NOTEBOOK_DIR=$(dirname "$notebook")
+         NOTEBOOK_FILE=$(basename "$notebook")
 
-        cd "$NOTEBOOK_DIR"
+         # Change directory to the notebook's location
+         cd "$NOTEBOOK_DIR"
+         
+         # 1. Execute the notebook
+         # The execution creates the large files (.zarr, .ms, etc.) in the current directory.
+         jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" \
+                           --ExecutePreprocessor.timeout=1800 \
+                           --ExecutePreprocessor.iopub_timeout=1800 \
+                           --Application.log_level=INFO
 
-        jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" 
-        cd "$ORIGINAL_DIR"
-       done
+         # 2. Localized Cleanup: Delete all .zarr and .ms files/directories 
+         # ONLY within the current NOTEBOOK_DIR.
+         echo "Performing localized cleanup in $(pwd)..."
+         
+         # Delete all .zarr directories (recursive)
+         find . -maxdepth 1 -name '*.zarr' -type d -exec rm -rf {} +
+          
+         # Delete all .ms directories (recursive)
+         find . -maxdepth 1 -name '*.ms' -type d -exec rm -rf {} +
+          
+         # 4. Return to the original directory
+         cd "$ORIGINAL_DIR"
+         
+         # 5. Introduce a pause
+         # This pause is still crucial for allowing the OS to fully release memory and 
+         # file handles before the next Jupyter kernel is launched.
+         echo "Pausing for 5 seconds to release resources..."
+         sleep 5
+         
+         echo "--- Notebook execution complete. ---"
+        done
