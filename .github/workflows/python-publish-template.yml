@@ -25,7 +25,6 @@ jobs:
       run: |
           python3 -m pip install \
             --upgrade \
-            --extra-index-url https://test.pypi.org/simple/ \
             --user \
             pip build
     - name: Build a source distribution
