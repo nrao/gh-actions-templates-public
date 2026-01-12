@@ -53,6 +53,15 @@ jobs:
     steps:
     # - name: Check PYPI_TOKEN 
     #   run: echo "In template PYPI_TOKEN =${{ secrets.PYPI_TOKEN }}"
+    - name: Debug Secret Presence
+      run: |
+        if [ -z "${{ secrets.PYPI_TOKEN }}" ]; then
+          echo "PYPI_TOKEN is EMPTY"
+          exit 1
+        else
+          echo "PYPI_TOKEN is SET"
+        fi
+    
     - name: Download all the dists
       uses: actions/download-artifact@v4
       with:
