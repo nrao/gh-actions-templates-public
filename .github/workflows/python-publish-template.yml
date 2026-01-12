@@ -10,6 +10,10 @@ on:
         required: true
         type: string
 
+permissions:
+  id-token: none # Prevents the workflow from requesting an OIDC token
+  contents: read # Default GITHUB_TOKEN permission
+
 jobs:
   build:
     name: Build distribution 📦
