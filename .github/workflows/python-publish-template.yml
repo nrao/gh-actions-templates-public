@@ -10,9 +10,9 @@ on:
         required: true
         type: string
 
-permissions:
-  id-token: write # Prevents the workflow from requesting an OIDC token
-  contents: read # Default GITHUB_TOKEN permission
+# permissions:
+#   id-token: write # Prevents the workflow from requesting an OIDC token
+#   contents: read # Default GITHUB_TOKEN permission
 
 jobs:
   build:
@@ -63,4 +63,4 @@ jobs:
       with:
         user: "__token__"
         password: ${{ secrets.PYPI_TOKEN }}  # Using your pre-generated PyPI token from GitHub secrets
-        attestations: false
+        #attestations: false
