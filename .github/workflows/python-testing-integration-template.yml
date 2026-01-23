@@ -34,7 +34,7 @@ on:
         default: "main"
         type: string
     secrets:
-      DISPATCH_TOKEN:
+      TESTVIPER_DISPATCH_TOKEN:
         required: true
 
 jobs:
