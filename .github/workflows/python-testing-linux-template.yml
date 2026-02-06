@@ -17,6 +17,9 @@ on:
       cov_project:
         required: true
         type: string
+    secrets:
+      CODECOV_TOKEN:
+        required: true
 
 jobs:
   build:
