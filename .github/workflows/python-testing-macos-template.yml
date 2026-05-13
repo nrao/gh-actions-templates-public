@@ -38,6 +38,11 @@ jobs:
           channels: conda-forge
           channel-priority: strict
 
+      - name: Ensure pip is installed
+        run: |
+          conda install -n test pip -y
+          python -m pip --version
+
       # 📌 Pin libboost-python, to avoid not finding libboost_graph.dylib error
       - name: Pin boost version
         run: conda install libboost-python=1.86.0
