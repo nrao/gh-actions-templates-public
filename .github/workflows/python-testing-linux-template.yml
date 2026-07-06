@@ -17,6 +17,16 @@ on:
       cov_project:
         required: true
         type: string
+      gcc-version:
+        description: >-
+          If set (e.g. "14"), install gcc-N/g++-N from the runner's default apt
+          repos and use it as CC/CXX for the build. Needed by projects whose
+          C/C++ extensions require a newer standard (astroviper needs GCC >= 14
+          for C++23). Empty = use the runner's default compiler (unchanged
+          behaviour for pure-Python projects).
+        required: false
+        type: string
+        default: ""
     secrets:
       CODECOV_TOKEN:
         required: true
@@ -35,6 +45,17 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
+
+    - name: Install GCC ${{ inputs.gcc-version }}
+      if: ${{ inputs.gcc-version != '' }}
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y "gcc-${{ inputs.gcc-version }}" "g++-${{ inputs.gcc-version }}"
+        # Make the requested compiler the one CMake/scikit-build-core picks up
+        # for the pip build below (env persists to later steps via GITHUB_ENV).
+        echo "CC=gcc-${{ inputs.gcc-version }}" >> "$GITHUB_ENV"
+        echo "CXX=g++-${{ inputs.gcc-version }}" >> "$GITHUB_ENV"
+        "g++-${{ inputs.gcc-version }}" --version
 
     - name: Install dependencies with pip
       run: |
