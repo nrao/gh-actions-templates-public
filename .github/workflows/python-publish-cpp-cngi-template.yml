@@ -41,6 +41,17 @@ jobs:
           CIBW_ARCHS_MACOS: "arm64"
           CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
           CIBW_MANYLINUX_AARCH64_IMAGE: "manylinux_2_28"
+          # C++ extensions build as C++23 (GCC >= 14). manylinux_2_28 is
+          # AlmaLinux 8; install gcc-toolset-14 and point the build at it so
+          # wheels build deterministically regardless of the image's default
+          # toolset. (There is no gcc-toolset-15 for el8 -- hence GCC 14.)
+          # Applies to both the x86_64 and the emulated aarch64 container.
+          CIBW_BEFORE_ALL_LINUX: "dnf -y install gcc-toolset-14 || yum -y install gcc-toolset-14"
+          CIBW_ENVIRONMENT_LINUX: >-
+            PATH=/opt/rh/gcc-toolset-14/root/usr/bin:$PATH
+            CC=/opt/rh/gcc-toolset-14/root/usr/bin/gcc
+            CXX=/opt/rh/gcc-toolset-14/root/usr/bin/g++
+            LD_LIBRARY_PATH=/opt/rh/gcc-toolset-14/root/usr/lib64:$LD_LIBRARY_PATH
           CIBW_TEST_COMMAND: "python -c \"import astroviper; print(dir(astroviper))\""
         run: |
           python -m cibuildwheel --output-dir wheelhouse
