@@ -33,6 +33,17 @@ on:
         required: false
         default: "main"
         type: string
+      gcc-version:
+        description: >-
+          GCC major version to install (gcc-N/g++-N) and use as CC/CXX for the
+          builds below. This integration workflow ALWAYS builds AstroVIPER --
+          either the PR package or a fresh clone -- and AstroVIPER's C++
+          extensions require C++23 (GCC >= 14), so this defaults to "14"
+          (unlike the per-repo linux template, whose gcc install is opt-in).
+          Set to "" to use the runner's default compiler.
+        required: false
+        default: "14"
+        type: string
     secrets:
       TESTVIPER_DISPATCH_TOKEN:
         required: true
@@ -53,6 +64,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Install GCC ${{ inputs.gcc-version }}
+        if: ${{ inputs.gcc-version != '' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "gcc-${{ inputs.gcc-version }}" "g++-${{ inputs.gcc-version }}"
+          # Make the requested compiler the one CMake/scikit-build-core picks up
+          # when AstroVIPER's C++ extensions are built below (env persists to
+          # later steps via GITHUB_ENV).
+          echo "CC=gcc-${{ inputs.gcc-version }}" >> "$GITHUB_ENV"
+          echo "CXX=g++-${{ inputs.gcc-version }}" >> "$GITHUB_ENV"
+          "g++-${{ inputs.gcc-version }}" --version
 
       - name: Install core test dependencies
         run: |
