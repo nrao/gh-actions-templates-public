@@ -90,7 +90,9 @@ jobs:
          jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" \
                            --ExecutePreprocessor.timeout=1800 \
                            --ExecutePreprocessor.iopub_timeout=1800 \
-                           --Application.log_level=INFO
+                           --Application.log_level=DEBUG \
+                           --Application.log_format="[%(asctime)s] [%(name)s] %(levelname)s: %(message)s" \
+                           --Application.log_datefmt='%Y-%m-%d %H:%M:%S'
 
          # 2. Localized Cleanup: Delete all .zarr and .ms files/directories 
          # ONLY within the current NOTEBOOK_DIR.
