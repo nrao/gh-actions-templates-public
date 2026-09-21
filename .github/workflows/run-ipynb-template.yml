@@ -68,6 +68,15 @@ jobs:
         pip install ".[all]" #The magic if not present download fails in ipynb
         pip install graphviz
         pip install holoviews
+        # TEMPORARY: ipykernel <= 7.3.0 sends shell replies raw on the ROUTER socket
+        # its ZMQStream reads, which can drop the edge-triggered wake-up so the next
+        # execute_request is never read and the cell "hangs" until the cell timeout
+        # (ipython/ipykernel#1554, casangi/toolviper#52). Fixed on main by
+        # ipython/ipykernel#1529 but not yet released. Must come after the installs
+        # above so it is not replaced; remove once an ipykernel release > 7.3.0 exists.
+        pip install --force-reinstall --no-deps "ipykernel @ git+https://github.com/ipython/ipykernel@main"
+        # main still reports version 7.3.0; pip freeze shows the git URL and commit.
+        pip freeze | grep -i -E "^(ipykernel|jupyter[-_]client|nbclient|pyzmq|toolviper)( @|==)" || true
 
     - name: Run Jupyter notebooks
       run: |
@@ -87,9 +96,12 @@ jobs:
          
          # 1. Execute the notebook
          # The execution creates the large files (.zarr, .ms, etc.) in the current directory.
+         # Cell timeouts: healthy cells finish in well under a minute. A lost ZMQ
+         # wake-up in the Jupyter messaging stack (casangi/toolviper#52) stalls a
+         # cell for exactly this long, so keep it short to bound the cost of a stall.
          jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" \
-                           --ExecutePreprocessor.timeout=1800 \
-                           --ExecutePreprocessor.iopub_timeout=1800 \
+                           --ExecutePreprocessor.timeout=600 \
+                           --ExecutePreprocessor.iopub_timeout=600 \
                            --Application.log_level=DEBUG \
                            --Application.log_format="[%(asctime)s] [%(name)s] %(levelname)s: %(message)s" \
                            --Application.log_datefmt='%Y-%m-%d %H:%M:%S'
