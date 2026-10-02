@@ -1,5 +1,13 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
-# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions.
+# Reusable workflow: run a package's pytest suite on Linux and upload coverage
+# and test results to Codecov.
+#
+# Python versions:
+#   * `python-versions` is tested on pull requests, pushes to the default branch
+#     (i.e. merges), tags and manual runs.
+#   * If `push-python-versions` is set, pushes to any other branch test only
+#     that list instead. The VIPER repositories pass '["3.12", "3.13", "3.14"]'
+#     and '["3.13"]'. Both default to the previous behaviour (full matrix on
+#     every event) so existing callers are unaffected.
 
 name: "Python testing on Linux (template)"
 
@@ -7,9 +15,20 @@ on:
   workflow_call:
     inputs:
       python-versions:
+        description: >-
+          JSON list of Python versions to test (on every event, unless
+          push-python-versions is set).
         required: false
         type: string
-        default: '["3.11", "3.12", "3.13"]'  
+        default: '["3.11", "3.12", "3.13"]'
+      push-python-versions:
+        description: >-
+          JSON list of Python versions to test instead of python-versions on
+          pushes to branches other than the default branch, e.g. '["3.13"]'.
+          Empty = use python-versions there too.
+        required: false
+        type: string
+        default: ""
       test-path:
         required: false
         type: string
@@ -27,22 +46,41 @@ on:
         required: false
         type: string
         default: ""
+      ignore-requires-python:
+        description: >-
+          Temporary: run pip with --ignore-requires-python (via
+          PIP_IGNORE_REQUIRES_PYTHON) so a new Python version can be tested
+          before sibling packages on PyPI have been re-released with a relaxed
+          Requires-Python cap. Turn off once they have been.
+        required: false
+        type: boolean
+        default: false
     secrets:
       CODECOV_TOKEN:
-        required: true
+        # Optional so pull requests from forks (which receive no secrets) can
+        # still run.
+        required: false
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ${{ fromJson(inputs.python-versions) }}
+        # Push to a non-default branch (and push-python-versions set) ->
+        # push-python-versions; everything else -> python-versions.
+        python-version: ${{ fromJson((inputs.push-python-versions != '' && github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref != format('refs/heads/{0}', github.event.repository.default_branch)) && inputs.push-python-versions || inputs.python-versions) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
-    - name: Set up Python 3
-      uses: actions/setup-python@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -57,11 +95,17 @@ jobs:
         echo "CXX=g++-${{ inputs.gcc-version }}" >> "$GITHUB_ENV"
         "g++-${{ inputs.gcc-version }}" --version
 
+    - name: Ignore Requires-Python caps (temporary)
+      if: ${{ inputs.ignore-requires-python }}
+      run: |
+        echo "::warning::pip is ignoring Requires-Python in this job (ignore-requires-python: true). Remove once sibling packages are re-released."
+        echo "PIP_IGNORE_REQUIRES_PYTHON=1" >> "$GITHUB_ENV"
+
     - name: Install dependencies with pip
       run: |
         python -m pip install --upgrade pip
-        pip install \
-            ".[all]"
+        python -m pip install ".[all]"
+
     - name: Test with pytest
       run: |
         pytest -v ${{ inputs.test-path }} \
@@ -71,27 +115,26 @@ jobs:
         --junitxml=junit.xml -o junit_family=legacy
 
     - name: Upload pytest test results and coverage reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
-        name: pytest-results-${{ matrix.python-version }}
+        name: pytest-results-${{ matrix.os }}-${{ matrix.python-version }}
         path: |
           ./test-results.html
           ./htmlcov
       # Use always() to always run this step to publish test results when there are test failures
       if: ${{ always() }}
 
-    # - name: Check CODECOV_TOKEN
-    #   run: echo "CODECOV_TOKEN=${{ secrets.CODECOV_TOKEN }}"
-
     - name: Upload code coverage results to Codecov
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}  # Use the passed token from workflow_call
+        token: ${{ secrets.CODECOV_TOKEN }}
         slug: ${{ github.repository }}
 
     - name: Upload test stats to Codecov
       if: ${{ !cancelled() }}
-      uses: codecov/test-results-action@v1
+      uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         slug: ${{ github.repository }}
+        report_type: test_results
+        files: ./junit.xml
