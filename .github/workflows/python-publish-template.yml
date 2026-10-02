@@ -1,5 +1,10 @@
-# This workflows will upload a Python Package for tagged commits
+# Reusable workflow: build a pure-Python package (sdist + py3-none-any wheel)
+# and, for tag refs (e.g. a GitHub release), upload it to PyPI.
 # For more information see: https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
+#
+# Same as python-publish-cngi-template.yml, kept for existing callers that use
+# `secrets: inherit` instead of passing PYPI_TOKEN explicitly. Its metadata
+# check is not --strict (an existing caller has no long_description).
 
 name: Publish Python 🐍 distribution 📦 to PyPI and TestPyPI
 
@@ -9,10 +14,12 @@ on:
       pypi-url:
         required: true
         type: string
+    secrets:
+      PYPI_TOKEN:
+        required: false
 
-# permissions:
-#   id-token: write # Prevents the workflow from requesting an OIDC token
-#   contents: read # Default GITHUB_TOKEN permission
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -20,21 +27,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - uses: actions/checkout@v7
       with:
-        python-version: "3.11"
-    - name: Install pypa/build
-      run: |
-          python3 -m pip install \
-            --upgrade \
-            --user \
-            pip build
-    - name: Build a source distribution
-      run: python3 -m build
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.13"
+    - name: Install pypa/build and twine
+      run: python -m pip install --upgrade pip build twine
+    - name: Build a source distribution and wheel
+      run: python -m build
+    - name: Check the distribution metadata
+      run: python -m twine check dist/*
     - name: Store the distribution packages
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: python-package-distributions
         path: dist/
@@ -51,19 +58,19 @@ jobs:
       url: ${{ inputs.pypi-url }}
 
     steps:
-    # - name: Check PYPI_TOKEN 
-    #   run: echo "In template PYPI_TOKEN =${{ secrets.PYPI_TOKEN }}"
-    - name: Debug Secret Presence
+    - name: Check PYPI_TOKEN is set
+      env:
+        PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
       run: |
-        if [ -z "${{ secrets.PYPI_TOKEN }}" ]; then
+        if [ -z "$PYPI_TOKEN" ]; then
           echo "PYPI_TOKEN is EMPTY"
           exit 1
         else
           echo "PYPI_TOKEN is SET"
         fi
-    
+
     - name: Download all the dists
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: python-package-distributions
         path: dist/
@@ -72,4 +79,3 @@ jobs:
       with:
         user: "__token__"
         password: ${{ secrets.PYPI_TOKEN }}  # Using your pre-generated PyPI token from GitHub secrets
-        #attestations: false
