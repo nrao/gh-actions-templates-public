@@ -1,12 +1,21 @@
+# Reusable workflow: run a package's pytest suite on macOS (arm64) in a
+# conda-forge environment that provides python-casacore (it has no macOS
+# wheels on PyPI).
+#
+# The VIPER repositories call this on pull requests and on pushes to main only.
+
 name: "Python testing on MacOS (template)"
 
 on:
   workflow_call:
     inputs:
       python-versions:
+        description: >-
+          JSON list of Python versions to test. The VIPER repositories pass
+          '["3.12", "3.13", "3.14"]'.
         required: false
         type: string
-        default: '["3.11", "3.12", "3.13"]' 
+        default: '["3.11", "3.12", "3.13"]'
       test-path:
         required: false
         type: string
@@ -20,6 +29,27 @@ on:
         required: false
         type: string
         default: ""
+      fortran-compiler:
+        description: >-
+          If set (e.g. "gfortran-14"), export FC as the full path of this
+          compiler so CMake finds a Fortran compiler (the macOS runners ship
+          Homebrew GCC as gfortran-N, without a bare `gfortran`). Empty = no
+          Fortran compiler is configured.
+        required: false
+        type: string
+        default: ""
+      ignore-requires-python:
+        description: >-
+          Temporary: run pip with --ignore-requires-python (via
+          PIP_IGNORE_REQUIRES_PYTHON) so a new Python version can be tested
+          before sibling packages on PyPI have been re-released with a relaxed
+          Requires-Python cap. Turn off once they have been.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -27,7 +57,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        shell: bash -l {0}
+        # -e: stop at the first failing command (plain `bash -l` would not).
+        shell: bash -el {0}
     strategy:
       fail-fast: false
       matrix:
@@ -38,13 +69,16 @@ jobs:
         run: |
           while true; do echo "Still running..."; sleep 300; done &
       - name: Setup Conda
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@v4
         with:
-          auto-activate-base: false
+          # macOS images bundle no conda; use Miniforge (conda-forge only)
+          # rather than letting the action fall back to Anaconda Miniconda.
+          miniforge-version: latest
+          auto-activate: false
           activate-environment: test
-          auto-update-conda: true
           python-version: ${{ matrix.python-version }}
           channels: conda-forge
+          conda-remove-defaults: "true"
           channel-priority: strict
 
       - name: Ensure pip is installed
@@ -52,24 +86,41 @@ jobs:
           conda install -n test pip -y
           python -m pip --version
 
-      # 📌 Pin libboost-python, to avoid not finding libboost_graph.dylib error
-      - name: Pin boost version
-        run: conda install libboost-python=1.86.0
+      # No libboost-python pin any more: the missing libboost_graph.dylib it
+      # worked around (conda-forge/boost-feedstock#234) is fixed, and the pin
+      # made Python 3.14 unsolvable (its python-casacore builds need boost >= 1.88).
+      - name: Install python-casacore from conda-forge
+        run: conda install -n test -y python-casacore
 
-      - run: conda install python-casacore
-      
-      - uses: actions/checkout@v4
-      
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Select Xcode ${{ inputs.xcode-version }}
         if: ${{ inputs.xcode-version != '' }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ inputs.xcode-version }}
 
+      - name: Use Fortran compiler ${{ inputs.fortran-compiler }}
+        if: ${{ inputs.fortran-compiler != '' }}
+        env:
+          FORTRAN_COMPILER: ${{ inputs.fortran-compiler }}
+        run: |
+          FC_PATH=$(command -v "$FORTRAN_COMPILER") || { echo "::error::Fortran compiler '$FORTRAN_COMPILER' not found on PATH"; exit 1; }
+          "$FC_PATH" --version
+          echo "FC=$FC_PATH" >> "$GITHUB_ENV"
+
+      - name: Ignore Requires-Python caps (temporary)
+        if: ${{ inputs.ignore-requires-python }}
+        run: |
+          echo "::warning::pip is ignoring Requires-Python in this job (ignore-requires-python: true). Remove once sibling packages are re-released."
+          echo "PIP_IGNORE_REQUIRES_PYTHON=1" >> "$GITHUB_ENV"
+
       - name: Install dependencies with pip
         run: |
           python -m pip install --upgrade pip
           python -m pip install ".[all]"
-          
+
       - name: Test with pytest
         run: pytest ${{ inputs.test-path }}

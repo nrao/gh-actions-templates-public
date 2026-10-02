@@ -1,8 +1,18 @@
+# Reusable workflow: execute every notebook under docs/ and fail if any of
+# them fails. The VIPER repositories call this on pull requests and on pushes
+# to main only.
 name: ipynb Tests
 
 on:
   workflow_call:
     inputs:
+      python-version:
+        description: >-
+          Python version to run the notebooks with. The VIPER repositories
+          pass "3.13".
+        required: false
+        type: string
+        default: "3.12"
       gcc-version:
         description: >-
           If set (e.g. "14"), install gcc-N/g++-N from the runner's default apt
@@ -14,6 +24,18 @@ on:
         required: false
         type: string
         default: ""
+      ignore-requires-python:
+        description: >-
+          Temporary: run pip with --ignore-requires-python (via
+          PIP_IGNORE_REQUIRES_PYTHON) so a new Python version can be tested
+          before sibling packages on PyPI have been re-released with a relaxed
+          Requires-Python cap. Turn off once they have been.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -22,7 +44,8 @@ jobs:
     timeout-minutes: 45
     defaults:
       run:
-        shell: bash -l {0}
+        # -e: stop at the first failing command (plain `bash -l` would not).
+        shell: bash -el {0}
     env:
       MPLBACKEND: Agg
       OMP_NUM_THREADS: "1"
@@ -34,22 +57,26 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.12"]
+        python-version: ["${{ inputs.python-version }}"]
     steps:
     - name: Setup Conda
-      uses: conda-incubator/setup-miniconda@v3
+      uses: conda-incubator/setup-miniconda@v4
       with:
-        auto-activate-base: false
+        # Miniforge (conda-forge only): ubuntu-26.04 images bundle no conda,
+        # and the bundled Miniconda would add Anaconda's defaults channel.
+        miniforge-version: latest
+        auto-activate: false
         activate-environment: test
-        auto-update-conda: true
         python-version: ${{ matrix.python-version }}
-        #channels: conda-forge
+        channels: conda-forge
+        conda-remove-defaults: "true"
 
-    - run: | 
-        conda config --add channels conda-forge
-        conda install -c conda-forge graphviz 
+    - name: Install graphviz from conda-forge
+      run: conda install -n test -y graphviz
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Install GCC ${{ inputs.gcc-version }}
       if: ${{ inputs.gcc-version != '' }}
@@ -62,68 +89,75 @@ jobs:
         echo "CXX=g++-${{ inputs.gcc-version }}" >> "$GITHUB_ENV"
         "g++-${{ inputs.gcc-version }}" --version
 
+    - name: Ignore Requires-Python caps (temporary)
+      if: ${{ inputs.ignore-requires-python }}
+      run: |
+        echo "::warning::pip is ignoring Requires-Python in this job (ignore-requires-python: true). Remove once sibling packages are re-released."
+        echo "PIP_IGNORE_REQUIRES_PYTHON=1" >> "$GITHUB_ENV"
+
     - name: Install dependencies with pip
       run: |
         python -m pip install --upgrade pip
         pip install ".[all]" #The magic if not present download fails in ipynb
         pip install graphviz
         pip install holoviews
-        # TEMPORARY: ipykernel <= 7.3.0 sends shell replies raw on the ROUTER socket
-        # its ZMQStream reads, which can drop the edge-triggered wake-up so the next
-        # execute_request is never read and the cell "hangs" until the cell timeout
-        # (ipython/ipykernel#1554, casangi/toolviper#52). Fixed on main by
-        # ipython/ipykernel#1529 but not yet released. Must come after the installs
-        # above so it is not replaced; remove once an ipykernel release > 7.3.0 exists.
-        pip install --force-reinstall --no-deps "ipykernel @ git+https://github.com/ipython/ipykernel@main"
-        # main still reports version 7.3.0; pip freeze shows the git URL and commit.
+        # ipykernel <= 7.3.0 could drop the wake-up for the next execute_request
+        # so a cell "hangs" until the cell timeout (ipython/ipykernel#1554,
+        # casangi/toolviper#52); fixed by ipython/ipykernel#1529, released in 7.4.0.
+        pip install "ipykernel>=7.4.0"
         pip freeze | grep -i -E "^(ipykernel|jupyter[-_]client|nbclient|pyzmq|toolviper)( @|==)" || true
 
     - name: Run Jupyter notebooks
       run: |
-        ORIGINAL_DIR=$(pwd)
-        
-        # Initial check (optional but good practice)
+        # Run every notebook, then fail the step if any of them failed.
+        failed=()
+
         echo "Starting notebook execution loop..."
-        
-        for notebook in $(find docs -name '*.ipynb'); do
-         echo "--- Running notebook: $notebook ---"
-         
-         NOTEBOOK_DIR=$(dirname "$notebook")
-         NOTEBOOK_FILE=$(basename "$notebook")
 
-         # Change directory to the notebook's location
-         cd "$NOTEBOOK_DIR"
-         
-         # 1. Execute the notebook
-         # The execution creates the large files (.zarr, .ms, etc.) in the current directory.
-         # Cell timeouts: healthy cells finish in well under a minute. A lost ZMQ
-         # wake-up in the Jupyter messaging stack (casangi/toolviper#52) stalls a
-         # cell for exactly this long, so keep it short to bound the cost of a stall.
-         jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" \
-                           --ExecutePreprocessor.timeout=600 \
-                           --ExecutePreprocessor.iopub_timeout=600 \
-                           --Application.log_level=DEBUG \
-                           --Application.log_format="[%(asctime)s] [%(name)s] %(levelname)s: %(message)s" \
-                           --Application.log_datefmt='%Y-%m-%d %H:%M:%S'
+        while IFS= read -r -d '' notebook; do
+          echo "--- Running notebook: $notebook ---"
 
-         # 2. Localized Cleanup: Delete all .zarr and .ms files/directories 
-         # ONLY within the current NOTEBOOK_DIR.
-         echo "Performing localized cleanup in $(pwd)..."
-         
-         # Delete all .zarr directories (recursive)
-         find . -maxdepth 1 -name '*.zarr' -type d -exec rm -rf {} +
-          
-         # Delete all .ms directories (recursive)
-         find . -maxdepth 1 -name '*.ms' -type d -exec rm -rf {} +
-          
-         # 4. Return to the original directory
-         cd "$ORIGINAL_DIR"
-         
-         # 5. Introduce a pause
-         # This pause is still crucial for allowing the OS to fully release memory and 
-         # file handles before the next Jupyter kernel is launched.
-         echo "Pausing for 5 seconds to release resources..."
-         sleep 5
-         
-         echo "--- Notebook execution complete. ---"
-        done
+          NOTEBOOK_DIR=$(dirname "$notebook")
+          NOTEBOOK_FILE=$(basename "$notebook")
+
+          # Change directory to the notebook's location
+          pushd "$NOTEBOOK_DIR" > /dev/null
+
+          # 1. Execute the notebook
+          # The execution creates the large files (.zarr, .ms, etc.) in the current directory.
+          # Cell timeouts: healthy cells finish in well under a minute. A lost ZMQ
+          # wake-up in the Jupyter messaging stack (casangi/toolviper#52) stalls a
+          # cell for exactly this long, so keep it short to bound the cost of a stall.
+          if ! jupyter nbconvert --to notebook --execute "$NOTEBOOK_FILE" --output "$NOTEBOOK_FILE" \
+                                 --ExecutePreprocessor.timeout=600 \
+                                 --ExecutePreprocessor.iopub_timeout=600 \
+                                 --Application.log_level=DEBUG \
+                                 --Application.log_format="[%(asctime)s] [%(name)s] %(levelname)s: %(message)s" \
+                                 --Application.log_datefmt='%Y-%m-%d %H:%M:%S'; then
+            echo "::error file=$notebook::Notebook failed: $notebook"
+            failed+=("$notebook")
+          fi
+
+          # 2. Localized Cleanup: Delete all .zarr and .ms files/directories
+          # ONLY within the current NOTEBOOK_DIR.
+          echo "Performing localized cleanup in $(pwd)..."
+          find . -maxdepth 1 -name '*.zarr' -type d -exec rm -rf {} +
+          find . -maxdepth 1 -name '*.ms' -type d -exec rm -rf {} +
+
+          # 3. Return to the original directory
+          popd > /dev/null
+
+          # 4. Introduce a pause
+          # This pause is still crucial for allowing the OS to fully release memory and
+          # file handles before the next Jupyter kernel is launched.
+          echo "Pausing for 5 seconds to release resources..."
+          sleep 5
+
+          echo "--- Notebook execution complete. ---"
+        done < <(find docs -name '*.ipynb' -not -path '*/.ipynb_checkpoints/*' -print0 | sort -z)
+
+        if (( ${#failed[@]} )); then
+          echo "${#failed[@]} notebook(s) failed:"
+          printf '  %s\n' "${failed[@]}"
+          exit 1
+        fi
