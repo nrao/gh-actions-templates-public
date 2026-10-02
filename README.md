@@ -44,7 +44,7 @@ templates `@main` too.
 | Template | Purpose | Main inputs (default) |
 |---|---|---|
 | `python-testing-linux-template.yml` | pytest + coverage on Linux, uploads coverage and test results to Codecov | `cov_project` (required), `python-versions` (`["3.11", "3.12", "3.13"]`), `push-python-versions` (`""` = use `python-versions`), `test-path` (`tests/`), `gcc-version` (`""`), `ignore-requires-python` (`false`) |
-| `python-testing-macos-template.yml` | pytest on macOS arm64 in a conda-forge env with python-casacore | `python-versions` (`["3.11", "3.12", "3.13"]`), `test-path`, `xcode-version` (`""`), `ignore-requires-python` |
+| `python-testing-macos-template.yml` | pytest on macOS arm64 in a conda-forge env with python-casacore | `python-versions` (`["3.11", "3.12", "3.13"]`), `test-path`, `xcode-version` (`""`), `fortran-compiler` (`""`, e.g. `gfortran-14`), `ignore-requires-python` |
 | `run-ipynb-template.yml` | Executes every notebook under `docs/`; fails if any notebook fails | `python-version` (`3.12`), `gcc-version`, `ignore-requires-python` |
 | `python-testing-integration-template.yml` | Installs ToolVIPER, XRADIO, GraphVIPER and AstroVIPER together and runs all their tests; on a push to `main` it dispatches to casangi/testviper | `python-versions` (`["3.13"]`), `<package>_ref` (`main`), `gcc-version` (`14`), `ignore-requires-python` |
 | `python-testing-casatools-template.yml` | pytest with casatools instead of python-casacore | `cov_project` (required), `python-versions` (`["3.11", "3.12"]`; casatools has no cp314 wheels), `casatools-version` (`""`), `pytest_ignore` |

@@ -29,6 +29,15 @@ on:
         required: false
         type: string
         default: ""
+      fortran-compiler:
+        description: >-
+          If set (e.g. "gfortran-14"), export FC as the full path of this
+          compiler so CMake finds a Fortran compiler (the macOS runners ship
+          Homebrew GCC as gfortran-N, without a bare `gfortran`). Empty = no
+          Fortran compiler is configured.
+        required: false
+        type: string
+        default: ""
       ignore-requires-python:
         description: >-
           Temporary: run pip with --ignore-requires-python (via
@@ -92,6 +101,15 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ inputs.xcode-version }}
+
+      - name: Use Fortran compiler ${{ inputs.fortran-compiler }}
+        if: ${{ inputs.fortran-compiler != '' }}
+        env:
+          FORTRAN_COMPILER: ${{ inputs.fortran-compiler }}
+        run: |
+          FC_PATH=$(command -v "$FORTRAN_COMPILER") || { echo "::error::Fortran compiler '$FORTRAN_COMPILER' not found on PATH"; exit 1; }
+          "$FC_PATH" --version
+          echo "FC=$FC_PATH" >> "$GITHUB_ENV"
 
       - name: Ignore Requires-Python caps (temporary)
         if: ${{ inputs.ignore-requires-python }}
