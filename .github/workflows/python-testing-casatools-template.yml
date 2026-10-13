@@ -53,13 +53,23 @@ jobs:
           # install the current package
           pip install ".[all]"
           pip uninstall python-casacore -y
-          pip install casatools 
-          # trigger `casa-data` fetch
-          mkdir -p ~/.casa/data && python -c 'import casatools'
+          pip install casatools
+
+      - name: Cache casarundata
+        uses: actions/cache@v4
+        with:
+          path: ~/.casa/data
+          key: casarundata
+
+      - name: Get casarundata
+        run: |
+          mkdir -p ~/.casa/data
+          # If restored from cache, casaconfig will update casarundata
+          python -c "import casatools"
 
       - name: Test with pytest
         env:
-          SKIP_TESTS_CASATOOLS: "1"  # Skip tests that require casatasks
+          SKIP_TESTS_CASATOOLS: "1" # Skip tests that require casatasks
         run: |
           pytest -v ${{ inputs.test-path }} \
           --ignore=${{ inputs.pytest_ignore }} \
