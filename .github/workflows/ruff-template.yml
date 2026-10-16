@@ -1,0 +1,57 @@
+# Reusable workflow: lint with `ruff check` and check formatting with
+# `ruff format --check`, using the calling repository's ruff configuration
+# (pyproject.toml [tool.ruff] or ruff.toml).
+#
+# Repositories that already run ruff through pre-commit (.pre-commit-config.yaml
+# + a pre-commit workflow) do not need this template.
+
+name: "Lint with ruff (template)"
+
+on:
+  workflow_call:
+    inputs:
+      ruff-version:
+        description: >-
+          Ruff version to install, e.g. "0.16.10". Empty = the version pinned in
+          the repository's pyproject.toml, else the latest release. Pin it so a
+          new ruff release cannot change formatting under you.
+        required: false
+        type: string
+        default: ""
+      src:
+        description: Path(s) to lint, relative to the repository root.
+        required: false
+        type: string
+        default: "."
+      format-check:
+        description: Also fail if `ruff format` would reformat any file.
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: ruff check
+        uses: astral-sh/ruff-action@v4.1.0
+        with:
+          version: ${{ inputs.ruff-version }}
+          src: ${{ inputs.src }}
+          args: check --output-format=github
+
+      - name: ruff format --check
+        if: ${{ inputs.format-check }}
+        uses: astral-sh/ruff-action@v4.1.0
+        with:
+          version: ${{ inputs.ruff-version }}
+          src: ${{ inputs.src }}
+          args: format --check --diff

@@ -1,3 +1,10 @@
+# Reusable workflow: build binary wheels (cibuildwheel) and an sdist for a
+# package with C/C++ extensions and, for tag refs, upload them to PyPI.
+#
+# Wheels: CPython 3.12, 3.13 and 3.14 (no free-threaded builds) for Linux
+# x86_64 and macOS arm64. See python-publish-cpp-cngi-template.yml for the
+# variant that also builds Linux aarch64 and uses a GCC 14 toolchain.
+
 name: Build & Publish to PyPI
 
 on:
@@ -6,6 +13,33 @@ on:
       pypi-url:
         required: true
         type: string
+      import-name:
+        description: >-
+          Module imported to smoke-test every wheel. Empty = the repository
+          name.
+        required: false
+        type: string
+        default: ""
+      cibw-build:
+        description: cibuildwheel build selector (CIBW_BUILD).
+        required: false
+        type: string
+        default: "cp312-* cp313-* cp314-*"
+      ignore-requires-python:
+        description: >-
+          Temporary: in cibuildwheel's wheel-test venv, run pip with
+          --ignore-requires-python (via PIP_IGNORE_REQUIRES_PYTHON) so a wheel
+          for a new Python version can install sibling packages that PyPI still
+          caps below it. Turn off once they have been re-released.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      PYPI_TOKEN:
+        required: false
+
+permissions:
+  contents: read
 
 jobs:
   build-wheels:
@@ -17,43 +51,54 @@ jobs:
         os: [ubuntu-latest, macos-15]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python (driver, cibuildwheel installs its own Pythons)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.13"
 
+      - name: Ignore Requires-Python caps in the wheel tests (temporary)
+        if: ${{ inputs.ignore-requires-python }}
+        run: |
+          echo "::warning::pip ignores Requires-Python in the cibuildwheel test venvs (ignore-requires-python: true). Remove once sibling packages are re-released."
       - name: Install cibuildwheel
-        run: python -m pip install --upgrade pip cibuildwheel==2.21.3
+        run: python -m pip install --upgrade pip cibuildwheel==4.2.1
 
       - name: Show build matrix cibuildwheel sees
         run: python -m cibuildwheel --print-build-identifiers
+        env:
+          CIBW_BUILD: ${{ inputs.cibw-build }}
+          CIBW_ARCHS_LINUX: "x86_64"
+          CIBW_SKIP: "*-musllinux_* *-manylinux_i686 cp3??t-*"
+          CIBW_ARCHS_MACOS: "arm64"
 
       - name: Build wheels
         env:
-          # Build CPython 3.11, 3.12, 3.13
-          CIBW_BUILD: "cp311-* cp312-* cp313-*"
+          CIBW_BUILD: ${{ inputs.cibw-build }}
 
-          # Only 64-bit Linux (avoid i686)
+          # Only 64-bit Linux (avoid i686); no free-threaded (cp3??t) builds
           CIBW_ARCHS_LINUX: "x86_64"
-          CIBW_SKIP: "*-musllinux_* *-manylinux_i686"
+          CIBW_SKIP: "*-musllinux_* *-manylinux_i686 cp3??t-*"
 
-          # macOS: build only the runner's native arch (prevents duplicates)
-          # CIBW_ARCHS_MACOS: "native"
-          # macOS: pick arch based on runner
+          # macOS: build only arm64
           CIBW_ARCHS_MACOS: "arm64"
 
           # Manylinux baseline for Linux wheels
           CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
 
-          # Optional quick import test
-          CIBW_TEST_COMMAND: "python -c \"import astroviper; print(dir(astroviper))\""
+          # Quick import test
+          CIBW_TEST_COMMAND: "python -c \"import ${{ inputs.import-name || github.event.repository.name }}\""
+          # Applied to the test venv before the wheel is pip-installed, inside the
+          # manylinux container and on macOS.
+          CIBW_TEST_ENVIRONMENT: ${{ inputs.ignore-requires-python && 'PIP_IGNORE_REQUIRES_PYTHON=1' || '' }}
         run: |
           python -m cibuildwheel --output-dir wheelhouse
 
       - name: Upload wheel artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
@@ -62,13 +107,15 @@ jobs:
     name: Build sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
         with:
-          python-version: "3.11"
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
       - run: python -m pip install --upgrade pip build
       - run: python -m build --sdist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -82,12 +129,12 @@ jobs:
       name: release
       url: ${{ inputs.pypi-url }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: sdist
           path: dist

@@ -1,12 +1,20 @@
+# DEPRECATED: the VIPER repositories format with ruff (via pre-commit, or
+# ruff-template.yml). Kept only so any remaining callers keep working; use
+# ruff-template.yml for new callers.
 name: Lint
 
 
 on:
     workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: psf/black@stable

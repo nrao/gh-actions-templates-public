@@ -1,3 +1,11 @@
+# Reusable workflow: build binary wheels (cibuildwheel) and an sdist for a
+# package with C/C++ extensions and, for a GitHub release, upload them to PyPI.
+#
+# Wheels: CPython 3.12, 3.13 and 3.14 (no free-threaded builds) for Linux
+# x86_64 and aarch64 (both built natively on GitHub runners, no QEMU) and
+# macOS arm64. Callers may also trigger this on pull requests / pushes to
+# build-check the wheels: the publish job only runs for release events.
+
 name: Build & Publish to PyPI
 
 on:
@@ -6,57 +14,90 @@ on:
       pypi-url:
         required: true
         type: string
+      import-name:
+        description: >-
+          Module imported to smoke-test every wheel. Empty = the repository
+          name (e.g. "astroviper").
+        required: false
+        type: string
+        default: ""
+      cibw-build:
+        description: cibuildwheel build selector (CIBW_BUILD).
+        required: false
+        type: string
+        default: "cp312-* cp313-* cp314-*"
+      ignore-requires-python:
+        description: >-
+          Temporary: in cibuildwheel's wheel-test venv, run pip with
+          --ignore-requires-python (via PIP_IGNORE_REQUIRES_PYTHON) so a wheel
+          for a new Python version can install sibling packages that PyPI still
+          caps below it. Turn off once they have been re-released.
+        required: false
+        type: boolean
+        default: false
     secrets:
       PYPI_TOKEN:
-        required: true
+        # Only needed by the publish job (release events). Optional so
+        # build-only runs (e.g. pull requests from forks) work without it.
+        required: false
+
+permissions:
+  contents: read
 
 jobs:
   build-wheels:
-    name: Build wheels
+    name: Build wheels (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
+        # ubuntu-latest -> manylinux x86_64, ubuntu-24.04-arm -> manylinux
+        # aarch64, macos-15 -> macOS arm64.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15]
+    env:
+      CIBW_BUILD: ${{ inputs.cibw-build }}
+      # cp3??t-* guards against free-threaded builds (cibuildwheel >= 3.1
+      # builds cp314t by default when the selector allows it).
+      CIBW_SKIP: "*-musllinux_* *-manylinux_i686 cp3??t-*"
+      CIBW_ARCHS_LINUX: "native"
+      CIBW_ARCHS_MACOS: "arm64"
+      CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
+      CIBW_MANYLINUX_AARCH64_IMAGE: "manylinux_2_28"
+      # C++ extensions build as C++23 (GCC >= 14). manylinux_2_28 is
+      # AlmaLinux 8; install gcc-toolset-14 and point the build at it so
+      # wheels build deterministically regardless of the image's default
+      # toolset. (There is no gcc-toolset-15 for el8 -- hence GCC 14.)
+      CIBW_BEFORE_ALL_LINUX: "dnf -y install gcc-toolset-14 || yum -y install gcc-toolset-14"
+      CIBW_ENVIRONMENT_LINUX: >-
+        PATH=/opt/rh/gcc-toolset-14/root/usr/bin:$PATH
+        CC=/opt/rh/gcc-toolset-14/root/usr/bin/gcc
+        CXX=/opt/rh/gcc-toolset-14/root/usr/bin/g++
+        LD_LIBRARY_PATH=/opt/rh/gcc-toolset-14/root/usr/lib64:$LD_LIBRARY_PATH
+      CIBW_TEST_COMMAND: "python -c \"import ${{ inputs.import-name || github.event.repository.name }}\""
+      # Applied to the test venv before the wheel is pip-installed, inside the
+      # manylinux container and on macOS (GITHUB_ENV would not reach the container).
+      CIBW_TEST_ENVIRONMENT: ${{ inputs.ignore-requires-python && 'PIP_IGNORE_REQUIRES_PYTHON=1' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Set up Python (driver, cibuildwheel installs its own Pythons)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.13"
+      - name: Ignore Requires-Python caps in the wheel tests (temporary)
+        if: ${{ inputs.ignore-requires-python }}
+        run: |
+          echo "::warning::pip ignores Requires-Python in the cibuildwheel test venvs (ignore-requires-python: true). Remove once sibling packages are re-released."
       - name: Install cibuildwheel
-        run: python -m pip install --upgrade pip cibuildwheel==2.21.3
-      - name: Set up QEMU for aarch64 emulation
-        if: runner.os == 'Linux'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
+        run: python -m pip install --upgrade pip cibuildwheel==4.2.1
       - name: Show build matrix cibuildwheel sees
         run: python -m cibuildwheel --print-build-identifiers
       - name: Build wheels
-        env:
-          CIBW_BUILD: "cp311-* cp312-* cp313-*"
-          CIBW_ARCHS_LINUX: "x86_64 aarch64"
-          CIBW_SKIP: "*-musllinux_* *-manylinux_i686"
-          CIBW_ARCHS_MACOS: "arm64"
-          CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
-          CIBW_MANYLINUX_AARCH64_IMAGE: "manylinux_2_28"
-          # C++ extensions build as C++23 (GCC >= 14). manylinux_2_28 is
-          # AlmaLinux 8; install gcc-toolset-14 and point the build at it so
-          # wheels build deterministically regardless of the image's default
-          # toolset. (There is no gcc-toolset-15 for el8 -- hence GCC 14.)
-          # Applies to both the x86_64 and the emulated aarch64 container.
-          CIBW_BEFORE_ALL_LINUX: "dnf -y install gcc-toolset-14 || yum -y install gcc-toolset-14"
-          CIBW_ENVIRONMENT_LINUX: >-
-            PATH=/opt/rh/gcc-toolset-14/root/usr/bin:$PATH
-            CC=/opt/rh/gcc-toolset-14/root/usr/bin/gcc
-            CXX=/opt/rh/gcc-toolset-14/root/usr/bin/g++
-            LD_LIBRARY_PATH=/opt/rh/gcc-toolset-14/root/usr/lib64:$LD_LIBRARY_PATH
-          CIBW_TEST_COMMAND: "python -c \"import astroviper; print(dir(astroviper))\""
         run: |
           python -m cibuildwheel --output-dir wheelhouse
       - name: Upload wheel artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
@@ -65,13 +106,15 @@ jobs:
     name: Build sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
         with:
-          python-version: "3.11"
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
       - run: python -m pip install --upgrade pip build
       - run: python -m build --sdist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -85,12 +128,12 @@ jobs:
       name: release
       url: ${{ inputs.pypi-url }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: sdist
           path: dist
