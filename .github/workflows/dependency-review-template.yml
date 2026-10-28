@@ -341,7 +341,8 @@ jobs:
               )
               report += [
                   f"Resolved packages for Python {python_version or 'of the runner'} on {', '.join(platforms)}, "
-                  f"all optional dependencies included: {len(base_versions)} on the base branch, "
+                  f"{'all optional dependencies included: ' if any(f.endswith('pyproject.toml') for f in files) else ''}"
+                  f"{len(base_versions)} on the base branch, "
                   f"{len(head_versions)} in this pull request ({len(added)} added, {len(removed)} removed, {len(changed)} changed version).",
                   "",
               ]
