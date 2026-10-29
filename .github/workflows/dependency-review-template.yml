@@ -1,0 +1,411 @@
+# Reusable workflow: dependency review for pull requests.
+#
+# Resolves the dependency tree, all optional dependencies included, on the base
+# branch and on the pull request with uv (Linux and macOS by default), then
+#   - warns about new direct dependencies: discuss them with the technical lead
+#     before merging;
+#   - checks the license of every added or changed package and fails on strong
+#     copyleft or unrecognised licenses not listed in license-exceptions;
+#   - warns about circular dependencies that involve our packages.
+# The report goes to the job summary; warnings and errors are annotations on
+# the pull request.
+
+name: "Dependency review (template)"
+
+on:
+  workflow_call:
+    inputs:
+      dependency-files:
+        description: >-
+          Space-separated files that declare the dependencies, relative to the
+          repository root: pyproject.toml (all optional dependencies are
+          included) and/or pip requirements files.
+        required: false
+        type: string
+        default: "pyproject.toml"
+      license-exceptions:
+        description: >-
+          Packages accepted although their license fails the check, one per
+          line as "package: reason".
+        required: false
+        type: string
+        default: ""
+      stack-packages:
+        description: >-
+          Space-separated names of our packages; circular dependencies that
+          involve any of them raise a warning.
+        required: false
+        type: string
+        default: "toolviper pyasdm radio-telescope-delay-model xradio graphviper astrohack astroviper flowviper benchviper testviper"
+      python-version:
+        description: >-
+          Python version to resolve for. Empty = the lowest version allowed by
+          requires-python in pyproject.toml, else the runner's Python.
+        required: false
+        type: string
+        default: ""
+      platforms:
+        description: Space-separated uv --python-platform targets to resolve for.
+        required: false
+        type: string
+        default: "x86_64-manylinux_2_28 aarch64-apple-darwin"
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: python -m pip install --upgrade pip uv
+
+      - name: Copy the dependency files of the base branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DEPENDENCY_FILES: ${{ inputs.dependency-files }}
+        run: |
+          git fetch --depth=1 origin "$BASE_SHA"
+          for file in $DEPENDENCY_FILES; do
+            mkdir -p "$RUNNER_TEMP/base/$(dirname "$file")"
+            git show "$BASE_SHA:$file" > "$RUNNER_TEMP/base/$file" 2>/dev/null || rm -f "$RUNNER_TEMP/base/$file"
+          done
+
+      - name: Review dependencies
+        env:
+          BASE_DIR: ${{ runner.temp }}/base
+          DEPENDENCY_FILES: ${{ inputs.dependency-files }}
+          LICENSE_EXCEPTIONS: ${{ inputs.license-exceptions }}
+          STACK_PACKAGES: ${{ inputs.stack-packages }}
+          PYTHON_VERSION: ${{ inputs.python-version }}
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import tomllib
+          import urllib.request
+          from concurrent.futures import ThreadPoolExecutor
+          from pathlib import Path
+
+          PERMISSIVE = re.compile(
+              r"\b(MIT|BSD|APACHE|ISC|PSF|PYTHON|0BSD|CC0|CC-BY|ZLIB|UNLICENSE|HPND|CNRI|PUBLIC DOMAIN)",
+              re.I,
+          )
+          WEAK_COPYLEFT = re.compile(r"\b(LGPL|MPL|MOZILLA|LESSER GENERAL PUBLIC)", re.I)
+          STRONG_COPYLEFT = re.compile(r"\b(AGPL|GPL|GENERAL PUBLIC LICENSE)", re.I)
+          REQUIREMENT = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+          def normalize(name):
+              return re.sub(r"[-_.]+", "-", name).lower()
+
+
+          def annotate(level, title, message):
+              print(f"::{level} title={title}::{message}")
+
+
+          def declared(path, label):
+              """Map each directly declared package to the groups that declare it."""
+              groups = {}
+              if not path.exists():
+                  return groups, None, None
+              if path.name == "pyproject.toml":
+                  project = tomllib.loads(path.read_text()).get("project", {})
+                  sections = {"dependencies": project.get("dependencies", [])}
+                  for extra, requirements in project.get("optional-dependencies", {}).items():
+                      sections[f"[{extra}]"] = requirements
+                  own = normalize(project.get("name", ""))
+                  min_python = re.search(r">=\s*(3\.\d+)", project.get("requires-python", ""))
+              else:
+                  lines = [ln.split("#")[0] for ln in path.read_text().splitlines()]
+                  sections = {
+                      label: [
+                          ln for ln in lines if ln.strip() and not ln.lstrip().startswith("-")
+                      ]
+                  }
+                  own, min_python = None, None
+              for group, requirements in sections.items():
+                  for requirement in requirements:
+                      name = normalize(REQUIREMENT.match(requirement).group(1))
+                      if name != own:
+                          groups.setdefault(name, set()).add(group)
+              return groups, own, min_python.group(1) if min_python else None
+
+
+          def resolve(paths, python_version, platforms):
+              """Resolve per platform; a package resolved to different versions keeps all of them."""
+              found, edges = {}, set()
+              for platform in platforms:
+                  command = [
+                      "uv",
+                      "pip",
+                      "compile",
+                      *map(str, paths),
+                      "--python-platform",
+                      platform,
+                  ]
+                  command += ["--no-header", "--quiet"]
+                  if any(p.name == "pyproject.toml" for p in paths):
+                      command.append("--all-extras")
+                  if python_version:
+                      command += ["--python-version", python_version]
+                  result = subprocess.run(command, capture_output=True, text=True)
+                  if result.returncode:
+                      raise RuntimeError(result.stderr.strip())
+                  current = None
+                  for line in result.stdout.splitlines():
+                      if m := re.match(
+                          r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==(\S+)", line
+                      ):
+                          current = normalize(m.group(1))
+                          found.setdefault(current, set()).add(m.group(2))
+                      elif (
+                          current
+                          and (m := re.match(r"^\s+#\s+(?:via\s+)?(\S.*?)\s*$", line))
+                          and m.group(1) != "via"
+                      ):
+                          parent = m.group(1)
+                          if root := re.match(
+                              r"^([A-Za-z0-9][A-Za-z0-9._-]*) \(.*pyproject\.toml\)$", parent
+                          ):
+                              parent = root.group(1)
+                          elif parent.startswith("-r "):
+                              parent = parent[3:]
+                          edges.add((normalize(re.sub(r"\[.*\]", "", parent)), current))
+              versions = {name: " | ".join(sorted(v)) for name, v in found.items()}
+              return versions, edges
+
+
+          def pypi_license(name, version):
+              try:
+                  with urllib.request.urlopen(
+                      f"https://pypi.org/pypi/{name}/{version}/json", timeout=30
+                  ) as r:
+                      info = json.load(r)["info"]
+              except OSError as err:
+                  return f"lookup failed ({err})"
+              if info.get("license_expression"):
+                  return info["license_expression"]
+              classifiers = [
+                  c.split("::")[-1].strip()
+                  for c in info.get("classifiers") or []
+                  if c.startswith("License ::")
+              ]
+              if classifiers:
+                  return " / ".join(classifiers)
+              license_field = (info.get("license") or "").strip()
+              return license_field.splitlines()[0][:80] if license_field else "unknown"
+
+
+          def license_verdict(license_text):
+              # "A OR B" expressions and multiple trove classifiers can be used under the most permissive option.
+              options = re.split(r"\s+OR\s+|\s*/\s*", license_text)
+              if any(PERMISSIVE.search(o) and not STRONG_COPYLEFT.search(o) for o in options):
+                  return "ok"
+              if any(WEAK_COPYLEFT.search(o) for o in options):
+                  return "ok (weak copyleft, use unmodified)"
+              if any(STRONG_COPYLEFT.search(o) for o in options):
+                  return "not allowed: strong copyleft"
+              return "not allowed: license not recognised"
+
+
+          def cycles(edges):
+              """Strongly connected components with more than one package (Tarjan)."""
+              graph = {}
+              for a, b in edges:
+                  graph.setdefault(a, []).append(b)
+              index, low, stack, on_stack, found = {}, {}, [], set(), []
+
+              def visit(v):
+                  index[v] = low[v] = len(index)
+                  stack.append(v)
+                  on_stack.add(v)
+                  for w in graph.get(v, []):
+                      if w not in index:
+                          visit(w)
+                          low[v] = min(low[v], low[w])
+                      elif w in on_stack:
+                          low[v] = min(low[v], index[w])
+                  if low[v] == index[v]:
+                      component = []
+                      while True:
+                          w = stack.pop()
+                          on_stack.discard(w)
+                          component.append(w)
+                          if w == v:
+                              break
+                      if len(component) > 1:
+                          found.append(sorted(component))
+
+              sys.setrecursionlimit(10000)
+              for v in list(graph):
+                  if v not in index:
+                      visit(v)
+              return found
+
+
+          def main():
+              files = os.environ["DEPENDENCY_FILES"].split()
+              base_dir = Path(os.environ["BASE_DIR"])
+              stack = {normalize(p) for p in os.environ.get("STACK_PACKAGES", "").split()}
+              platforms = os.environ.get(
+                  "PLATFORMS", "x86_64-manylinux_2_28 aarch64-apple-darwin"
+              ).split()
+              exceptions = {}
+              for line in os.environ.get("LICENSE_EXCEPTIONS", "").splitlines():
+                  if ":" in line:
+                      name, reason = line.split(":", 1)
+                      exceptions[normalize(name.strip())] = reason.strip()
+
+              head_declared, base_declared, own_names, pythons = {}, {}, set(), []
+              for file in files:
+                  for target, path in (
+                      (head_declared, Path(file)),
+                      (base_declared, base_dir / file),
+                  ):
+                      groups, own, min_python = declared(path, file)
+                      for name, where in groups.items():
+                          target.setdefault(name, set()).update(where)
+                      if target is head_declared and own:
+                          own_names.add(own)
+                          pythons.append(min_python)
+              python_version = os.environ.get("PYTHON_VERSION") or min(
+                  filter(None, pythons), default=None, key=lambda v: tuple(map(int, v.split(".")))
+              )
+
+              existing = [p for p in (base_dir / f for f in files) if p.exists()]
+              head_versions, head_edges = resolve(
+                  [Path(f) for f in files], python_version, platforms
+              )
+              base_versions, _ = (
+                  resolve(existing, python_version, platforms) if existing else ({}, set())
+              )
+
+              report = ["## Dependency review", ""]
+              failed = False
+
+              new = sorted(set(head_declared) - set(base_declared))
+              moved = sorted(
+                  n
+                  for n in set(head_declared) & set(base_declared)
+                  if head_declared[n] - base_declared[n]
+              )
+              if new:
+                  report += [
+                      "### New direct dependencies",
+                      "",
+                      "Discuss these with the technical lead before merging.",
+                      "",
+                  ]
+                  for name in new:
+                      where = ", ".join(sorted(head_declared[name]))
+                      annotate(
+                          "warning",
+                          "New dependency",
+                          f"{name} is a new direct dependency ({where}). Discuss it with the technical lead before merging.",
+                      )
+                      report.append(f"- `{name}`: {where}")
+                  report.append("")
+              if moved:
+                  report += ["### Existing dependencies declared in more places", ""]
+                  for name in moved:
+                      where = ", ".join(sorted(head_declared[name] - base_declared[name]))
+                      annotate(
+                          "notice",
+                          "Dependency added to another group",
+                          f"{name} is now also declared in {where}.",
+                      )
+                      report.append(f"- `{name}`: now also in {where}")
+                  report.append("")
+
+              added = sorted(set(head_versions) - set(base_versions))
+              removed = sorted(set(base_versions) - set(head_versions))
+              changed = sorted(
+                  n
+                  for n in set(head_versions) & set(base_versions)
+                  if head_versions[n] != base_versions[n]
+              )
+              report += [
+                  f"Resolved packages for Python {python_version or 'of the runner'} on {', '.join(platforms)}, "
+                  f"{'all optional dependencies included: ' if any(f.endswith('pyproject.toml') for f in files) else ''}"
+                  f"{len(base_versions)} on the base branch, "
+                  f"{len(head_versions)} in this pull request ({len(added)} added, {len(removed)} removed, {len(changed)} changed version).",
+                  "",
+              ]
+              if removed:
+                  report += ["Removed: " + ", ".join(f"`{n}`" for n in removed), ""]
+
+              to_check = [(n, "added") for n in added] + [
+                  (n, f"{base_versions[n]} → {head_versions[n]}") for n in changed
+              ]
+              if to_check:
+                  with ThreadPoolExecutor(8) as pool:
+                      licenses = list(
+                          pool.map(
+                              lambda item: pypi_license(
+                                  item[0], head_versions[item[0]].split(" | ")[-1]
+                              ),
+                              to_check,
+                          )
+                      )
+                  report += [
+                      "### Licenses of added and changed packages",
+                      "",
+                      "| Package | Version | Change | License | Verdict |",
+                      "|---|---|---|---|---|",
+                  ]
+                  for (name, change), lic in zip(to_check, licenses, strict=True):
+                      verdict = license_verdict(lic)
+                      if verdict.startswith("not allowed") and name in exceptions:
+                          verdict = f"exception: {exceptions[name]}"
+                      if verdict.startswith("not allowed"):
+                          failed = True
+                          annotate(
+                              "error",
+                              "License not allowed",
+                              f"{name} {head_versions[name]}: {lic}. Replace it, or add it to license-exceptions with a reason after review.",
+                          )
+                      report.append(
+                          f"| `{name}` | {head_versions[name]} | {change} | {lic} | {verdict} |"
+                      )
+                  report.append("")
+
+              ours = stack | own_names
+              loops = [c for c in cycles(head_edges) if ours & set(c)]
+              if loops:
+                  report += ["### Circular dependencies involving our packages", ""]
+                  for component in loops:
+                      members = " ⇄ ".join(component)
+                      annotate(
+                          "warning",
+                          "Circular dependency",
+                          f"Circular dependency between {members}.",
+                      )
+                      report.append(f"- {members}")
+                  report.append("")
+
+              text = "\n".join(report)
+              print(text)
+              if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+                  with open(summary, "a") as f:
+                      f.write(text + "\n")
+              return 1 if failed else 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          PY
